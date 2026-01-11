@@ -1,0 +1,80 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "EnemyController.h"
+
+#include "BaseEnemy.h"
+#include "EnemyStates.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISense_Damage.h"
+#include "Perception/AISense_Hearing.h"
+#include "Perception/AISense_Sight.h"
+
+AEnemyController::AEnemyController()
+{
+	AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>("AIPerception");
+}
+
+void AEnemyController::OnSensed(AActor* Actor, FAIStimulus Stimulus)
+{
+	auto SenseType = UAIPerceptionSystem::GetSenseClassForStimulus(GetWorld(), Stimulus);
+	EEnemyStates CurrentState = static_cast<EEnemyStates>(GetBlackboardComponent()->GetValueAsEnum("CurrentState"));
+	
+	if (SenseType == UAISense_Sight::StaticClass())
+	{
+		if (Stimulus.WasSuccessfullySensed())
+		{
+			// ejecutar animacion al entrar en el estado de chase
+			// dar valor a la variable del blackboard target
+			// move to target
+
+			GetBlackboardComponent()->SetValueAsObject("Target", Actor);
+			ChangeState(static_cast<uint8>(EEnemyStates::Chase));
+		}else
+		{
+			GetBlackboardComponent()->SetValueAsVector("PointOfInterest", Stimulus.StimulusLocation);
+			ChangeState(static_cast<uint8>(EEnemyStates::Investigate));
+		}
+	}
+
+	else if (SenseType == UAISense_Hearing::StaticClass() && CurrentState != EEnemyStates::Chase )
+	{
+		if (Stimulus.WasSuccessfullySensed())
+		{
+			GetBlackboardComponent()->SetValueAsVector("PointOfInterest", Stimulus.StimulusLocation);
+			ChangeState(static_cast<uint8>(EEnemyStates::Investigate));
+		}
+	}
+
+	else if (SenseType == UAISense_Damage::StaticClass() && CurrentState != EEnemyStates::Chase )
+	{
+		if (Stimulus.WasSuccessfullySensed())
+		{
+			FVector DamageDirection = Stimulus.StimulusLocation - GetPawn()->GetActorLocation();
+			DamageDirection.Z = 0;
+			DamageDirection.Normalize();
+
+			FVector InterestLocation = GetPawn()->GetActorLocation() + DamageDirection * 400;
+			GetBlackboardComponent()->SetValueAsVector("PointOfInterest", InterestLocation);
+			GetBlackboardComponent()->ClearValue("CurrentState"); // Reiniciar el estado actual
+			ChangeState(static_cast<uint8>(EEnemyStates::Investigate));
+		}
+	}
+}
+
+
+void AEnemyController::BeginPlay()
+{
+	Super::BeginPlay();
+	RunBehaviorTree(BehaviorTree);
+
+	ChangeState(static_cast<uint8>(EEnemyStates::Patrol));
+	AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this,&AEnemyController::OnSensed);
+}
+
+void AEnemyController::ChangeState(uint8 State)
+{
+	GetBlackboardComponent()->SetValueAsEnum("ChangeState", State);
+}
+
